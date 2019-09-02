@@ -1,0 +1,159 @@
+(let
+  ((null? . (lambda (x)
+              (eq? x nil)))
+   (map   . (lambda (fn args)
+              (if (eq? args nil)
+                  nil
+                  (cons (fn (car args)) (map fn (cdr args)))))))
+  (let ((not . null?))
+    (map
+      (lambda (x) (not (null? x)))
+      '(one nil () (nil) two))))
+
+(let
+# super mega basic stuff
+  ((null? . (lambda (x)
+              (eq? x nil)))
+   (atom? . (lambda (x)
+              (eq? x x)))
+
+# appq and apply
+   (appq . (lambda (li)
+             (if (null? li) nil
+                 (cons
+                   (cons 'quote (cons (car li) nil))
+                   (appq (cdr li))))))
+   (apply . (lambda (f args)
+              (eval (cons f (appq args)) (*env*))))
+
+   (not . (lambda (x)
+            (if (null? x) 't nil)))
+
+   (list . (lambda li li))
+   (append . (lambda (x y)
+               (if (null? x) y
+                   (cons (car x) (append (cdr x) y))))))
+
+  (apply list '(one two three))
+
+)
+
+# this should return (nn two . NIB)!
+(let
+  ((one . 'two)
+   (c-p-one . (let ((p-one . (lambda (zz)
+     (cons one zz))))
+     (lambda (nn) (cons 'nn (p-one zz))))))
+  (c-p-one 'NIB))
+
+
+This is the base file of sl4.  The kernel reads and evaluates exactly
+one expression from its base input file, so none of this prose is read.
+
+Other script files, which would be called by this one, should have more
+sensible scripty semantics.
+
+=== the sl4 kernel ===
+
+The sl4 kernel is a pretty-minimal C-language base for the rest of the
+language.
+
+Things it does not do:
+
+ - It does not (yet) know how to GC.
+ - It has no strings or ints or anything other than symbols and cons cells
+   (and primitives and procs, but those are fairly special).
+ - It has no I/O.
+ - It has no (real) error handling, other than occasionally printing an
+   error and immediately exiting.
+
+The kernel operates by reading a single S-expression from either stdin or
+the file given in argv[1] and printing the evaluated result.
+
+The language has the usual lists built from the usual cons pairs in the
+usual way.  Boolean values are given by 't and nil.  "Maps" are a-lists, of
+the form
+
+((k1 . v1) (k2 . v2) (k3 . v3))
+
+Note that each key/value pair is a simple cons pair, rather than a list of
+two elements.  Essentially all data structures in the language are lists or
+a-lists.
+
+The language is lexically scoped:  The expression
+
+(let
+  ((z . 'AAA))
+  (let
+    ((pz . (lambda () z)))
+    (let
+      ((z . 'ZZZ))
+      (pz))))
+=> AAA
+
+since the lambda associated with `pz` has the lexical scope where `z` is
+associated with `AAA`.
+
+There are nine primitives in `sl4`.  Most of them are not variadic; if
+more arguments are given than parameters to primitives, they are simply
+ignored (and left unevaluated).  The primitives are:
+
+car: Take the car of the evaluated first argument.  If it is an atom,
+return the atom itself.
+
+(car '(one two))
+=> one
+
+cdr: Take the cdr of the evaluated first argument.  If it is an atom,
+return nil.
+
+(cdr '(one two))
+=> two
+
+cons: Return the cons pair made up of the evaluated first two arguments.
+
+(cons 'one 'two)
+=> (one . two)
+
+eq?: Test for atomic equality of the evaluted first two arguments.  If
+either is not atomic, nil is returned.
+
+(eq? 'zip 'zap)
+=> nil
+
+eval: Evaluate the evaluated first argument with the evaluted second
+argument as its environment.  Often the second argument is a call to *env*.
+
+(eval (cons 'cdr '(quote (one . two))) (*env*))
+=> two
+
+*env*: Return the current environment as an a-list.  Takes no arguments.
+
+cond: Takes pairs as arguments.  Takes the first pair and evaluates (car
+pair); if it is truthy (non-nil), returns the evaluated (cdr pair).  If
+not, tries again with the next pair.  If no pair evaluates truthy, returns
+nil.
+
+lambda: Defines a lambda, with the syntax (lambda (params ...) (body))
+
+let: Takes two arguments -- an a-list and a list, and executes the list in
+the environment made up of the a-list (with cdrs evaluated) prepended to
+the env.
+
+Generally, let functions like Scheme's let; the values of the a-list are
+evaluated equally as part of the outer environment -- BUT, all lambda
+values will be executed with the full (inner) env, allowing for the same
+benefits as Scheme's letrec!  The following example demonstrates this,
+using mutual recursion:
+
+(let
+  ((even? . (lambda (li)
+     (cond ((null? li)      . 't)
+           ((odd? (cdr li)) . 't)
+           ('t              . nil))))
+   (odd?  . (lambda (li)
+     (cond ((null? li)       . nil)
+           ((even? (cdr li)) . 't)
+           ('t               . nil)))))
+  (odd? '(1 2 3)))
+=> t
